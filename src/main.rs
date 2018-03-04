@@ -1,20 +1,32 @@
 #[macro_use]
 extern crate quicli;
-use quicli::prelude::*;
 
-use std::path::PathBuf;
-use std::net::SocketAddr;
+extern crate zmq;
 
+// mod app;
+// use app::prelude::*;
 
-trait Command {
-    fn run(&self) -> Result<()>;
-}
+pub mod utils;
+pub use utils::*;
+
+use std::sync::Arc;
 
 
 /// Simple network performance tester
 #[derive(Debug, StructOpt)]
 #[structopt(raw(setting = "structopt::clap::AppSettings::ColoredHelp"))]
-enum Cli {
+struct Cli {
+    /// Transport protocol to use
+    #[structopt(long="proto", short="P", default_value="tcp")]
+    proto: String,
+
+    #[structopt(subcommand)]
+    mode: Mode,
+}
+
+/// Operating modes
+#[derive(Debug, StructOpt)]
+enum Mode {
     /// Run in client mode, connect to <host> and transmit <file>
     #[structopt(name="client", alias="c")]
     Client(Client),
@@ -24,7 +36,7 @@ enum Cli {
     Server(Server),
 }
 
-/// Client specific options:
+/// Client specific options
 #[derive(Debug, StructOpt)]
 struct Client {
     // First positional argument:
@@ -46,8 +58,29 @@ struct Client {
 }
 
 impl Command for Client {
-    fn run(&self) -> Result<()> {
+    fn run(&self, engine: Box<Engine>) -> Result<()> {
         println!("Client: {:#?}", self);
+
+        // Read payload from user specified file
+        let (payload, load_time) = load_file(&self.file)?;
+        println!("Payload: {} bytes loaded in {}", payload.len(), load_time.seconds());
+
+        let payload = Arc::new(payload);
+        let mut handlers = vec![];
+
+        for dest in self.remote.iter() {
+            let tx = engine.transmitter(dest)?;
+            let buf = payload.clone();
+            let chunk_size = self.chunk_size;
+            let repeat = self.repeat;
+            handlers.push(thread::spawn(move || { tx.run(&buf, chunk_size, repeat) }));
+        }
+
+        for (i, handler) in handlers.into_iter().enumerate() {
+            handler.join().unwrap()?;
+            println!("Worker #{} terminated", i);
+        }
+
         Ok(())
     }
 }
@@ -66,8 +99,22 @@ struct Server {
 }
 
 impl Command for Server {
-    fn run(&self) -> Result<()> {
+    fn run(&self, engine: Box<Engine>) -> Result<()> {
         println!("Server: {:#?}", self);
+
+        let mut handlers = vec![];
+
+        for i in 0..self.threads {
+            let rx = engine.receiver(self.port + i as u16)?;
+            let handler = thread::spawn(move || { rx.run() });
+            handlers.push(handler);
+        }
+
+        for (i, handler) in handlers.into_iter().enumerate() {
+            handler.join().unwrap()?;
+            println!("Worker #{} terminated", i);
+        }
+
         Ok(())
     }
 }
@@ -75,8 +122,16 @@ impl Command for Server {
 
 /// Application's entry point (wrapped for error handling).
 main!(|args: Cli| {
-    match args {
-        Cli::Client(ref client) => client.run()?,
-        Cli::Server(ref server) => server.run()?,
+    let engine: Box<Engine> = match args.proto.as_ref() {
+        "tcp" => TCPEngine::new()?,
+        "zmq:pair" => ZMQEngine::new(zmq::PAIR)?,
+        "zmq:push" => ZMQEngine::new(zmq::PUSH)?,
+        "zmq:pull" => ZMQEngine::new(zmq::PULL)?,
+        _ => bail!("Unsupported protocol"),
+    };
+
+    match args.mode {
+        Mode::Client(ref client) => client.run(engine)?,
+        Mode::Server(ref server) => server.run(engine)?,
     }
 });
