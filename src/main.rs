@@ -1,15 +1,28 @@
 #[macro_use]
 extern crate quicli;
-
 extern crate zmq;
 
-// mod app;
-// use app::prelude::*;
 
-pub mod utils;
-pub use utils::*;
+/// Measure execution time of expression or code block.
+macro_rules! timeit {
+    ($e:expr) => ({
+        let t = time::Instant::now();
+        let res = $e;
+        (t.elapsed(), res)
+    })
+}
 
+
+mod utils;
+mod engines;
+
+
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::net::SocketAddr;
+use std::thread;
+use utils::*;
+use engines::*;
 
 
 /// Simple network performance tester
@@ -57,13 +70,20 @@ struct Client {
     repeat: usize,
 }
 
-impl Command for Client {
+impl Client {
     fn run(&self, engine: Box<Engine>) -> Result<()> {
+        if self.remote.len() == 0 {
+            bail!("Need at least one destination address");
+        }
+
         println!("Client: {:#?}", self);
 
         // Read payload from user specified file
-        let (payload, load_time) = load_file(&self.file)?;
-        println!("Payload: {} bytes loaded in {}", payload.len(), load_time.seconds());
+        let (load_time, payload) = timeit!(load_file(&self.file)?);
+        let load_time = load_time.seconds();
+        let size_mb = payload.len() as f64 / 1048576f64;
+        let speed_mb = size_mb / load_time;
+        println!("Payload: {:.2} MB ({}) loaded in {} = {:.2} MB/s", size_mb, payload.len(), load_time, speed_mb);
 
         let payload = Arc::new(payload);
         let mut handlers = vec![];
@@ -98,7 +118,7 @@ struct Server {
     threads: u8,
 }
 
-impl Command for Server {
+impl Server {
     fn run(&self, engine: Box<Engine>) -> Result<()> {
         println!("Server: {:#?}", self);
 
