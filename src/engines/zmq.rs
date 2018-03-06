@@ -40,6 +40,7 @@ impl Transmitter for Socket {
                 dest: "remote".to_owned()
             },
             Stats {
+                summary: false,
                 period: now.elapsed(),
                 bytes: buf.len(),
                 operations: buf.len() / chunk_size,

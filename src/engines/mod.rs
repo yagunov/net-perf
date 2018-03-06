@@ -46,23 +46,12 @@ pub trait Receiver: Send {
     fn receive(&self) -> Result<Option<(PeerInfo, Stats)>>;
 
     fn run(&self) -> Result<()> {
-        let mut reports = 0;
-
-        let mut avg = AvgStats::new();
-
         while let Some((peers, stats)) = self.receive()? {
-            reports += 1;
-
             println!(
                 "[{}] {} -> {}: {:.3} Gbps / {:.2} Mops",
-                reports, peers.src, peers.dest, stats.gbps(), stats.mops()
+                if stats.summary { "SUM" } else { "-" },
+                peers.src, peers.dest, stats.gbps(), stats.mops()
             );
-
-            avg.update(peers, &stats);
-        }
-
-        for (peers, avg_gbps, avg_mops) in avg.iter() {
-            println!("[SUM] {} -> {}: {:.3} Gbps / {:.2} Mops", peers.src, peers.dest, avg_gbps, avg_mops);
         }
 
         Ok(())
@@ -71,7 +60,7 @@ pub trait Receiver: Send {
 
 
 /// Connection endpoints
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub struct PeerInfo {
     src: String,                // TODO: Use SocketAddr instead
     dest: String,
@@ -79,6 +68,7 @@ pub struct PeerInfo {
 
 /// Statistics report
 pub struct Stats {
+    summary: bool,
     period: time::Duration,
     bytes: usize,
     operations: usize,
@@ -87,6 +77,7 @@ pub struct Stats {
 impl Stats {
     fn zero() -> Self {
         Self {
+            summary: false,
             period: time::Duration::from_secs(0),
             bytes: 0,
             operations: 0,
