@@ -1,8 +1,6 @@
-use std::time;
+use std::{cmp, time, thread};
 use std::cell::RefCell;
-use std::cmp;
 use std::sync::mpsc;
-use std::thread;
 use utils::*;
 use super::*;
 
@@ -10,7 +8,7 @@ use std::net::{TcpStream, TcpListener, Shutdown};
 use std::io::{Read, Write};
 
 
-pub struct TCPEngine {}
+pub struct TcpEngine {}
 
 struct Client {
     stream: RefCell<TcpStream>,
@@ -21,13 +19,13 @@ struct Server {
 }
 
 
-impl TCPEngine {
+impl TcpEngine {
     pub fn new() -> Result<Box<Self>> {
         Ok(Box::new(Self {}))
     }
 }
 
-impl Engine for TCPEngine {
+impl Engine for TcpEngine {
     fn transmitter(&self, destination: &SocketAddr) -> Result<Box<Transmitter>> {
         Ok(Box::new(Client {
             stream: RefCell::new(TcpStream::connect(destination)?)
@@ -91,6 +89,9 @@ impl Receiver for Server {
 
 
 fn handle_client(mut stream: TcpStream, tx: mpsc::Sender<Option<(PeerInfo, Stats)>>) -> Result<()> {
+    // Disconnect after 1 second of silence
+    stream.set_read_timeout(Some(time::Duration::from_secs(1)))?;
+
     let peers = PeerInfo {
         src: format!("{}", stream.peer_addr()?),
         dest: format!("{}", stream.local_addr()?),
@@ -98,19 +99,27 @@ fn handle_client(mut stream: TcpStream, tx: mpsc::Sender<Option<(PeerInfo, Stats
 
     let mut buf = [0u8; 128 * 1024];
 
-    let mut t = time::Instant::now();
     let mut total = 0;
-    let mut nb_reads = 0;
+    let mut prev_total = 0;
+    let mut reads = 0;
+    let mut prev_reads = 0;
+
+    let start = time::Instant::now();
+    let mut t = start;
 
     while let Ok(size) = stream.read(&mut buf) {
+        total += size;
+        reads += 1;
+
         if size == 0 {
+            // Report summary statistics
             tx.send(Some((
                 peers.clone(),
                 Stats {
                     summary: true,
-                    period: t.elapsed(),
+                    period: start.elapsed(),
                     bytes: total,
-                    operations: nb_reads,
+                    operations: reads,
                 }
             )))?;
 
@@ -118,24 +127,23 @@ fn handle_client(mut stream: TcpStream, tx: mpsc::Sender<Option<(PeerInfo, Stats
             return Ok(());
         }
 
-        total += size;
-
-        // report approximated speed every 500MB
-        if total >= 500_000_000 {
+        let diff = total - prev_total;
+        if diff >= 500_000_000 {
+            // Report partial statistics
             tx.send(Some((
                 peers.clone(),
                 Stats {
                     summary: false,
                     period: t.elapsed(),
-                    bytes: total,
-                    operations: nb_reads,
+                    bytes: diff,
+                    operations: reads - prev_reads,
                 }
             )))?;
 
             // reset counters
             t = time::Instant::now();
-            total = 0;
-            nb_reads = 0;
+            prev_total = total;
+            prev_reads = reads;
         }
     }
 

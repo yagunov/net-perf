@@ -1,5 +1,5 @@
 [package]
-name = "cli-test"
+name = "net-perf"
 version = "0.1.0"
 authors = ["Andrey Yagunov <yagunov86@gmail.com>"]
 

@@ -128,5 +128,5 @@ impl AvgStats {
 mod tcp;
 mod zmq;
 
-pub use self::tcp::TCPEngine;
-pub use self::zmq::ZMQEngine;
+pub use self::tcp::*;
+pub use self::zmq::*;

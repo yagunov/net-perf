@@ -96,9 +96,8 @@ impl Client {
             handlers.push(thread::spawn(move || { tx.run(&buf, chunk_size, repeat) }));
         }
 
-        for (i, handler) in handlers.into_iter().enumerate() {
+        for handler in handlers.into_iter() {
             handler.join().unwrap()?;
-            println!("Worker #{} terminated", i);
         }
 
         Ok(())
@@ -130,9 +129,8 @@ impl Server {
             handlers.push(handler);
         }
 
-        for (i, handler) in handlers.into_iter().enumerate() {
+        for handler in handlers.into_iter() {
             handler.join().unwrap()?;
-            println!("Worker #{} terminated", i);
         }
 
         Ok(())
@@ -143,10 +141,11 @@ impl Server {
 /// Application's entry point (wrapped for error handling).
 main!(|args: Cli| {
     let engine: Box<Engine> = match args.proto.as_ref() {
-        "tcp" => TCPEngine::new()?,
-        "zmq:pair" => ZMQEngine::new(zmq::PAIR)?,
-        "zmq:push" => ZMQEngine::new(zmq::PUSH)?,
-        "zmq:pull" => ZMQEngine::new(zmq::PULL)?,
+        "tcp" => TcpEngine::new()?,
+        "zmq" |
+        "zmq:pushpull" => ZmqEngine::new(ZmqMode::PushPull)?,
+        "zmq:pubsub" => ZmqEngine::new(ZmqMode::PubSub)?,
+        "zmq:pair" => ZmqEngine::new(ZmqMode::Pair)?,
         _ => bail!("Unsupported protocol"),
     };
 
