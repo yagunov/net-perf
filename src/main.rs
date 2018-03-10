@@ -12,14 +12,12 @@ macro_rules! timeit {
     })
 }
 
-
 mod utils;
 mod engines;
 
-
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::net::SocketAddr;
 use std::thread;
 use utils::*;
 use engines::*;

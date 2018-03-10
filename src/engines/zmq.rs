@@ -1,9 +1,8 @@
-use zmq;
 use std::{cmp, time};
 use std::cell::RefCell;
+use zmq;
 use utils::*;
 use super::*;
-
 
 
 pub struct ZmqEngine {
@@ -19,11 +18,13 @@ pub enum ZmqMode {
 
 struct Client {
     socket: zmq::Socket,
+    peer: String,               // address of remote peer
 }
 
 struct Server {
     socket: zmq::Socket,
-    buf: RefCell<Vec<u8>>,
+    local: String,              // local socket address
+    buf: RefCell<Vec<u8>>,      // pre-allocated receive buffer
 }
 
 impl ZmqEngine {
@@ -42,12 +43,13 @@ impl Engine for ZmqEngine {
             ZmqMode::PubSub => zmq::PUB,
             ZmqMode::Pair => zmq::PAIR,
         };
+        let peer = format!("{}", destination);
         let endpoint = format!("tcp://{}", destination);
 
         let socket = self.context.socket(protocol)?;
         socket.connect(endpoint.as_str())?;
 
-        Ok(Box::new(Client { socket }))
+        Ok(Box::new(Client { socket, peer }))
     }
 
     fn receiver(&self, port: u16) -> Result<Box<Receiver>> {
@@ -56,6 +58,7 @@ impl Engine for ZmqEngine {
             ZmqMode::PubSub => zmq::SUB,
             ZmqMode::Pair => zmq::PAIR,
         };
+        let local = format!("0.0.0.0:{}", port);
         let endpoint = format!("tcp://*:{}", port);
 
         let socket = self.context.socket(protocol)?;
@@ -64,10 +67,9 @@ impl Engine for ZmqEngine {
             socket.set_subscribe(b"")?;
         }
 
-        Ok(Box::new(Server {
-            socket: socket,
-            buf: RefCell::new(Vec::with_capacity(128 * 1024))
-        }))
+        let buf = RefCell::new(Vec::with_capacity(RECV_BUF_SIZE));
+
+        Ok(Box::new(Server { socket, local, buf }))
     }
 }
 
@@ -87,7 +89,7 @@ impl Transmitter for Client {
         Ok((
             PeerInfo {
                 src: format!("local"),
-                dest: format!("remote"),
+                dest: self.peer.clone(),
             },
             Stats {
                 summary: false,
@@ -111,13 +113,13 @@ impl Receiver for Server {
         while let Ok(size) = self.socket.recv_into(&mut buf, 0) {
             total += size;
             reads += 1;
-            if total > 200_000_000 { break }
+            if total > RECV_REPORT_INTERVAL { break }
         }
 
         Ok(Some((
             PeerInfo {
-                src: format!("local"),
-                dest: format!("remote"),
+                src: format!("remote"),
+                dest: self.local.clone(),
             },
             Stats {
                 summary: false,

@@ -1,11 +1,10 @@
-use std::{cmp, time, thread};
 use std::cell::RefCell;
+use std::io::{Read, Write};
+use std::net::{TcpStream, TcpListener, Shutdown};
 use std::sync::mpsc;
+use std::{cmp, time, thread};
 use utils::*;
 use super::*;
-
-use std::net::{TcpStream, TcpListener, Shutdown};
-use std::io::{Read, Write};
 
 
 pub struct TcpEngine {}
@@ -97,7 +96,7 @@ fn handle_client(mut stream: TcpStream, tx: mpsc::Sender<Option<(PeerInfo, Stats
         dest: format!("{}", stream.local_addr()?),
     };
 
-    let mut buf = [0u8; 128 * 1024];
+    let mut buf = [0u8; RECV_BUF_SIZE];
 
     let mut total = 0;
     let mut prev_total = 0;
@@ -128,7 +127,7 @@ fn handle_client(mut stream: TcpStream, tx: mpsc::Sender<Option<(PeerInfo, Stats
         }
 
         let diff = total - prev_total;
-        if diff >= 500_000_000 {
+        if diff >= RECV_REPORT_INTERVAL {
             // Report partial statistics
             tx.send(Some((
                 peers.clone(),

@@ -1,5 +1,5 @@
-use std::net::SocketAddr;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use utils::*;
 
 
@@ -53,7 +53,6 @@ pub trait Receiver: Send {
                 peers.src, peers.dest, stats.gbps(), stats.mops()
             );
         }
-
         Ok(())
     }
 }
@@ -123,6 +122,13 @@ impl AvgStats {
         )
     }
 }
+
+
+/// Read at most this number of bytes at a time
+pub const RECV_BUF_SIZE: usize = 128 * 1024;
+
+/// Report receiver statistics after that many bytes
+pub const RECV_REPORT_INTERVAL: usize = 200 * 1024 * 1024;
 
 
 mod tcp;
