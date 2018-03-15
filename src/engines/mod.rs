@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use utils::*;
 
@@ -15,26 +14,36 @@ pub trait Engine {
 /// Transmitter (client) interface
 pub trait Transmitter: Send {
     /// Transmit payload by chunks
-    fn transmit(&self, buf: &[u8], chunk_size: usize) -> Result<(PeerInfo, Stats)>;
+    fn transmit(&self, buf: &[u8], chunk_size: usize) -> Result<Stats>;
+
+    /// Describe connection endpoints with human-readable tags
+    fn peers(&self) -> Result<PeerInfo> {
+        Ok(PeerInfo::new("local", "remote"))
+    }
 
     /// Execute transmitter
     fn run(&self, buf: &[u8], chunk_size: usize, repeat: usize) -> Result<()> {
-        let mut avg = AvgStats::new();
+        let peers = self.peers()?;
 
-        for i in 1..repeat+1 {
-            let (peers, stats) = self.transmit(buf, chunk_size)?;
+        let mut cumulative = Stats::zero(true);
+        let mut i = 1;
+
+        while i != repeat {     // repeat == 0 => infinite loop
+            let stats = self.transmit(buf, chunk_size)?;
+            cumulative.update(&stats);
 
             println!(
                 "[{}] {} -> {}: {:.3} Gbps / {:.2} Mops",
                 i, peers.src, peers.dest, stats.gbps(), stats.mops()
             );
 
-            avg.update(peers, &stats);
+            i += 1;
         }
 
-        for (peers, avg_gbps, avg_mops) in avg.iter() {
-            println!("[SUM] {} -> {}: {:.3} Gbps / {:.2} Mops", peers.src, peers.dest, avg_gbps, avg_mops);
-        }
+        println!(
+            "[SUM] {} -> {}: {:.3} Gbps / {:.2} Mops",
+            peers.src, peers.dest, cumulative.gbps(), cumulative.mops()
+        );
 
         Ok(())
     }
@@ -59,10 +68,16 @@ pub trait Receiver: Send {
 
 
 /// Connection endpoints
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(Clone)]
 pub struct PeerInfo {
-    src: String,                // TODO: Use SocketAddr instead
+    src: String,
     dest: String,
+}
+
+impl PeerInfo {
+    pub fn new(src: &str, dest: &str) -> PeerInfo {
+        PeerInfo { src: src.to_owned(), dest: dest.to_owned() }
+    }
 }
 
 /// Statistics report
@@ -74,13 +89,27 @@ pub struct Stats {
 }
 
 impl Stats {
-    fn zero() -> Self {
+    fn zero(summary: bool) -> Self {
         Self {
-            summary: false,
+            summary,
             period: time::Duration::from_secs(0),
             bytes: 0,
             operations: 0,
         }
+    }
+
+    fn summary(period: time::Duration, bytes: usize, operations: usize) -> Self {
+        Self { summary: true, period, bytes, operations }
+    }
+
+    fn partial(period: time::Duration, bytes: usize, operations: usize) -> Self {
+        Self { summary: false, period, bytes, operations }
+    }
+
+    fn update(&mut self, partial: &Stats) {
+        self.period += partial.period;
+        self.bytes += partial.bytes;
+        self.operations += partial.operations;
     }
 
     /// Calculate transmission speed in Gbps
@@ -94,35 +123,6 @@ impl Stats {
         (self.operations as f64 / self.period.seconds()) / 1e6f64
     }
 }
-
-/// Average statistics per connection
-struct AvgStats {
-    table: HashMap<PeerInfo, Stats>,
-}
-
-impl AvgStats {
-    fn new() -> Self {
-        Self { table: HashMap::new() }
-    }
-
-    fn update(&mut self, peers: PeerInfo, stats: &Stats) {
-        let entry = self.table.entry(peers).or_insert(Stats::zero());
-        entry.period += stats.period;
-        entry.bytes += stats.bytes;
-        entry.operations += stats.operations;
-    }
-
-    fn iter<'a>(&'a self) -> Box<Iterator<Item=(&PeerInfo, f64, f64)> + 'a> {
-        Box::new(
-            self.table
-                .iter()
-                .map(|(peers, stats)| {
-                    (peers, stats.gbps(), stats.mops())
-                })
-        )
-    }
-}
-
 
 /// Read at most this number of bytes at a time
 pub const RECV_BUF_SIZE: usize = 128 * 1024;

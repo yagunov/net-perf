@@ -47,14 +47,11 @@ impl Engine for TcpEngine {
             tx.send(None).unwrap();
         });
 
-        Ok(Box::new(Server {
-            reports: rx,
-        }))
-    }
+        Ok(Box::new(Server { reports: rx }))}
 }
 
 impl Transmitter for Client {
-    fn transmit(&self, buf: &[u8], chunk_size: usize) -> Result<(PeerInfo, Stats)> {
+    fn transmit(&self, buf: &[u8], chunk_size: usize) -> Result<Stats> {
         let t = time::Instant::now();
         let mut stream = self.stream.borrow_mut();
         let total = buf.len();
@@ -66,17 +63,7 @@ impl Transmitter for Client {
             offset += stream.write(&buf[offset..(offset + chunk)])?;
         }
 
-        Ok((
-            PeerInfo {
-                src: format!("{}", stream.local_addr()?),
-                dest: format!("{}", stream.peer_addr()?),
-            },
-            Stats {
-                summary: false,
-                period: t.elapsed(),
-                bytes: total,
-                operations: total / chunk_size,
-            }))
+        Ok(Stats::partial(t.elapsed(), total, total / chunk_size))
     }
 }
 
@@ -111,17 +98,8 @@ fn handle_client(mut stream: TcpStream, tx: mpsc::Sender<Option<(PeerInfo, Stats
         reads += 1;
 
         if size == 0 {
-            // Report summary statistics
-            tx.send(Some((
-                peers.clone(),
-                Stats {
-                    summary: true,
-                    period: start.elapsed(),
-                    bytes: total,
-                    operations: reads,
-                }
-            )))?;
-
+            // Report summary statistics and terminate socket
+            tx.send(Some((peers.clone(), Stats::summary(start.elapsed(), total, reads))))?;
             stream.shutdown(Shutdown::Both)?;
             return Ok(());
         }
@@ -129,15 +107,7 @@ fn handle_client(mut stream: TcpStream, tx: mpsc::Sender<Option<(PeerInfo, Stats
         let diff = total - prev_total;
         if diff >= RECV_REPORT_INTERVAL {
             // Report partial statistics
-            tx.send(Some((
-                peers.clone(),
-                Stats {
-                    summary: false,
-                    period: t.elapsed(),
-                    bytes: diff,
-                    operations: reads - prev_reads,
-                }
-            )))?;
+            tx.send(Some((peers.clone(), Stats::partial(t.elapsed(), diff, reads - prev_reads))))?;
 
             // reset counters
             t = time::Instant::now();

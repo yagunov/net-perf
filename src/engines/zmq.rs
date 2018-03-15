@@ -74,7 +74,11 @@ impl Engine for ZmqEngine {
 }
 
 impl Transmitter for Client {
-    fn transmit(&self, buf: &[u8], chunk_size: usize) -> Result<(PeerInfo, Stats)> {
+    fn peers(&self) -> Result<PeerInfo> {
+        Ok(PeerInfo::new("local", self.peer.as_ref()))
+    }
+
+    fn transmit(&self, buf: &[u8], chunk_size: usize) -> Result<Stats> {
         let t = time::Instant::now();
         let total = buf.len();
         let mut offset = 0;
@@ -86,17 +90,7 @@ impl Transmitter for Client {
             offset += chunk;
         }
 
-        Ok((
-            PeerInfo {
-                src: format!("local"),
-                dest: self.peer.clone(),
-            },
-            Stats {
-                summary: false,
-                period: t.elapsed(),
-                bytes: total,
-                operations: total / chunk_size,
-            }))
+        Ok(Stats::partial(t.elapsed(), total, total / chunk_size))
     }
 }
 
@@ -116,16 +110,9 @@ impl Receiver for Server {
             if total > RECV_REPORT_INTERVAL { break }
         }
 
-        Ok(Some((
-            PeerInfo {
-                src: format!("remote"),
-                dest: self.local.clone(),
-            },
-            Stats {
-                summary: false,
-                period: t.elapsed(),
-                bytes: total,
-                operations: reads,
-            })))
+        let peers = PeerInfo::new("remote", self.local.as_ref());
+        let stats = Stats::partial(t.elapsed(), total, reads);
+
+        Ok(Some((peers, stats)))
     }
 }
