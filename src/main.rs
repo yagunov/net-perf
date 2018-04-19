@@ -63,7 +63,7 @@ struct Client {
     #[structopt(long="chunk", short="C", default_value="512")]
     chunk_size: usize,
 
-    /// Count (example argument)
+    /// Repeat file transmission this number of times
     #[structopt(long="loop", short="l", default_value="1")]
     repeat: usize,
 }
